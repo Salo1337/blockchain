@@ -1,17 +1,62 @@
 ﻿#include <iostream>
 #include <mpi.h>
-#include <cstdlib>
-#include <ctime>
-const int N = 10;
+#include <chrono>
 
-void GaussMPI(double matrix[N][N + 1], double solution[N], int rank, int size) {
-	
-	int rowProcess = N / size;
-	int extraRows = N % size;
+const int n = 1000;
+int firstMatrix[n][n];
+int secondMatrix[n][n];
+int resultMatrix[n][n];
+int receivedResultMatrix[n][n];
+std::chrono::high_resolution_clock::time_point firstTimePoint, secondTimePoint;
+
+
+void printMatrix(int matrix[n][n]) {
+	for (int i = 0; i < n; ++i) {
+		for (int j = 0; j < n; ++j) {
+			std::cout << matrix[i][j] << " ";
+		}
+		std::cout << std::endl;
+	}
+}
+
+int main(int argc, char* argv[]) {
+	setlocale(LC_ALL, "RUSSIAN");
+
+	int rank, size;
+
+	MPI_Init(&argc, &argv);
+	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+	MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+	if (rank == 0) {
+		firstTimePoint = std::chrono::high_resolution_clock::now();
+	}
+
+	srand(time(NULL));
+	if (rank == 0) {
+		for (int i = 0; i < n; ++i) {
+			for (int j = 0; j < n; ++j) {
+				firstMatrix[i][j] = rand() % 100;
+				secondMatrix[i][j] = rand() % 100;
+				resultMatrix[i][j] = 0;
+				receivedResultMatrix[i][j] = 0;
+			}
+		}
+
+	/*	printMatrix(firstMatrix);
+		std::cout << std::endl;
+		printMatrix(secondMatrix);*/
+	}
+
+	MPI_Bcast(firstMatrix, n * n, MPI_INT, 0, MPI_COMM_WORLD);
+	MPI_Bcast(secondMatrix, n * n, MPI_INT, 0, MPI_COMM_WORLD);
+
+	int rowProcess = n / size;
+	int extraRows = n % size;
 	int startRow, endRow;
 
-	if (size >= N) {
-		if (rank < N) {
+	if (size >= n) {
+		if (rank < n) {
 			rowProcess = 1;
 			startRow = rank;
 			endRow = rank + 1;
@@ -32,105 +77,33 @@ void GaussMPI(double matrix[N][N + 1], double solution[N], int rank, int size) {
 		}
 		endRow = startRow + rowProcess;
 	}
-	// Прямой ход
-	for (int k = 0; k < N - 1; k++) {
-		for (int i = startRow; i < endRow; i++) {
-			if (i > k) {
-				double factor = matrix[i][k] / matrix[k][k];
-				for (int j = k; j < N + 1; j++) {
-					matrix[i][j] -= factor * matrix[k][j];
-				}
-				std::cout << "Thread " << rank << " row #" << i << " factor: " << factor << std::endl;
-				for (int m = 0; m < N; m++) {
-					for (int n = 0; n < N + 1; ++n) {
-						std::cout << matrix[m][n] << " ";
-					}
-					std::cout << std::endl;
-				}
+
+	for (int i = startRow; i < endRow; ++i) {
+		for (int j = 0; j < n; ++j) {
+			for (int k = 0; k < n; ++k) {
+				resultMatrix[i][j] += firstMatrix[i][k] * secondMatrix[k][j];
+				//std::cout << "Rank: " << rank << " Element: " << i << ":" << j << " Result: " << resultMatrix[i][j] << std::endl;
 			}
 
 		}
-		MPI_Allgather(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, matrix, rowProcess * (N + 1), MPI_DOUBLE, MPI_COMM_WORLD);
 	}
-
-	// Обратный ход
-	if (rank == 0) {
-		std::cout << std::endl;
-		std::cout << std::endl;
-
-		for (int m = 0; m < N; m++) {
-			for (int n = 0; n < N + 1; ++n) {
-				std::cout << matrix[m][n] << " ";
-			}
-			std::cout << std::endl;
-		}
-		std::cout << std::endl;
-
-		for (int i = N - 1; i >= 0; i--) {
-			solution[i] = matrix[i][N];
-			for (int j = i + 1; j < N; j++) {
-				solution[i] -= matrix[i][j] * solution[j];
-			}
-			solution[i] /= matrix[i][i];
-		}
-	}
-}
-
-
-
-
-//double matrix[N][N + 1] = { {1, 2, -1, 2}, {2, -3, 2, 2}, {3, 1, 1, 8} };
-//double matrix[N][N + 1] = { {1, 2, -1, 2,1}, {2, -3, 2, 2,4}, {3, 1, 1, 8,1}, {2, 3, 4, 1,6} };
-
-int main(int argc, char** argv) {
-	int rank, size;
-	MPI_Init(&argc, &argv);
-	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-	MPI_Comm_size(MPI_COMM_WORLD, &size);
-
-	if (size > N) {
-		if (rank == 0) {
-			std::cout << "Error" << std::endl;
-		}
-		MPI_Finalize();
-		return 0;
-	}
-
-	double matrix[N][N + 1];
+	MPI_Reduce(resultMatrix, receivedResultMatrix, n * n, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
 
 	if (rank == 0) {
-		srand(static_cast<unsigned int>(time(nullptr)));
-		 for (int i = 0; i < N; i++) {
-			 for (int j = 0; j < N + 1; ++j) {
-				 matrix[i][j] = rand() % 10 + 1;
-			 }
-		 }
-
-		std::cout << "Matrix:" << std::endl;
-		for (int i = 0; i < N; i++) {
-			for (int j = 0; j < N + 1; ++j) {
-				std::cout << matrix[i][j] << " ";
-			}
-			std::cout << std::endl;
-		}
+		secondTimePoint = std::chrono::high_resolution_clock::now();
+		std::cout << "Multiplication time: " << std::chrono::duration_cast<std::chrono::microseconds>(secondTimePoint - firstTimePoint).count() << " microseconds" << std::endl;
+		std::cout << "Result matrix:" << std::endl;
 		std::cout << std::endl;
-	}
-
-	for (int i = 0; i < N; i++) {
-		MPI_Bcast(matrix[i], N + 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-	}
-
-	double solution[N];
-	GaussMPI(matrix, solution, rank, size);
-	if (rank == 0) {
-		std::cout << "Solution:" << std::endl;
-		for (int i = 0; i < N; i++) {
-			std::cout << "x[" << i << "] = " << solution[i] << std::endl;
-		}
-		std::cout << std::endl;
+		//printMatrix(receivedResultMatrix);
 	}
 
 	MPI_Finalize();
 	return 0;
 }
+
+
+
+
+
+
 
